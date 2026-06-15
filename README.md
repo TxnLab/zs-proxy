@@ -36,7 +36,7 @@ zs-proxy version
 
 ## License
 
-[Apache-2.0](./LICENSE).
+[PolyForm Noncommercial 1.0.0](./LICENSE).
 
 ---
 
