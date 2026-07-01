@@ -35,7 +35,7 @@ on-chain account, not a static key. So any non-empty API key works in your clien
 
 ## Install
 
-### macOS / Linux (Homebrew)
+### macOS (Homebrew)
 
 ```sh
 brew install txnlab/tap/zs-proxy
