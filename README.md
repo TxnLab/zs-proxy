@@ -98,16 +98,15 @@ Linux Secret Service) on signed releases. Inspect it with `zs-proxy wallet show`
 
 ## Funding
 
-The simplest path is to **fund on [zerosignal.ai](https://zerosignal.ai)** — it's the same
-account the proxy uses. You can also fund from the CLI:
+The recommended path is to **sign in at [zerosignal.ai](https://zerosignal.ai), fund your
+account in the web ui, then run `zs-proxy wallet login`** — the proxy then signs-in with the same account, so funding on the web funds the proxy. You can also fund from the CLI:
 
 ```sh
-zs-proxy fund            # testnet: auto-dispense; mainnet: deposit address + QR + on-ramp links
-zs-proxy fund --wait     # poll until ALGO arrives, then opt in to USDC
+zs-proxy fund            # deposit address + QR + on-ramp links
+zs-proxy fund --wait     # poll until ALGO arrives, then opt in to USDC (which the web ui handles for you, as well as automatically converting the ALGO to USDC)
 ```
 
-`zs-proxy` defaults to **testnet**. Select a network with
-`--network testnet|mainnet|localnet` on any command. Confirm everything is ready with:
+`zs-proxy` runs on **mainnet** by default. Confirm everything is ready with:
 
 ```sh
 zs-proxy status     # wallet, balance, and funding status
@@ -185,7 +184,7 @@ zs-proxy wallet show | address                         # inspect the loaded wall
 zs-proxy wallet opt-in                                 # opt the account in to USDC
 
 # funding + health
-zs-proxy fund [--wait]                                 # testnet dispenser / mainnet deposit
+zs-proxy fund [--wait]                                 # deposit address + QR + on-ramp links
 zs-proxy status                                        # wallet, balance, funding status
 zs-proxy doctor                                        # end-to-end diagnostics
 
@@ -195,13 +194,13 @@ zs-proxy version                                        # product + proto versio
 zs-proxy --help                                         # full command tree
 ```
 
-Global flags (valid on most commands): `--network testnet|mainnet|localnet`, `--port`,
+Global flags (valid on most commands): `--network mainnet|localnet`, `--port`,
 `--config <path>`, `--foreground`.
 
 ## Configuration
 
 No `config.yaml` is required — `zs-proxy` ships with embedded per-network defaults and
-boots on **testnet** by default. Self-hosters can override with `--config <path>` or
+boots on **mainnet** by default. Self-hosters can override with `--config <path>` or
 `PROXY_*` environment variables; inspect what's actually in effect with:
 
 ```sh
