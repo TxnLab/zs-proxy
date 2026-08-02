@@ -210,7 +210,7 @@ zs-proxy config print-effective   # merged effective config (defaults + file + e
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](./LICENSE).
+[Apache License 2.0](./LICENSE).
 
 ---
 
