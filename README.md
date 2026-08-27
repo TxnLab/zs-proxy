@@ -4,7 +4,10 @@ A drop-in, private, OpenAI-compatible inference proxy.
 
 This repository hosts the **prebuilt release binaries** for `zs-proxy`. The
 binaries on the [Releases](https://github.com/txnlab/zs-proxy/releases) page are
-the canonical downloads for Homebrew, Scoop, and direct install.
+the canonical downloads for the installer script, Homebrew, and Scoop.
+
+📖 **Full documentation: [docs.zerosignal.ai](https://docs.zerosignal.ai/using-the-proxy/overview)** —
+this README is a condensed version of those pages.
 
 ## How it works
 
@@ -16,6 +19,10 @@ before it comes back. Clients can't tell they aren't talking to OpenAI.
 
 The `Authorization` header / API key is **always ignored** — admission is via your
 on-chain account, not a static key. So any non-empty API key works in your client.
+
+→ [What is the proxy](https://docs.zerosignal.ai/using-the-proxy/overview) ·
+[Privacy & security](https://docs.zerosignal.ai/for-users/privacy) ·
+[Pricing](https://docs.zerosignal.ai/for-users/pricing)
 
 ## Quick start
 
@@ -30,10 +37,27 @@ on-chain account, not a static key. So any non-empty API key works in your clien
    ```sh
    zs-proxy proxy start
    ```
-5. **Point your tool at it** — OpenAI-compatible base URL `http://localhost:8080/v1`,
-   with any API key (it's ignored). That's it. 😀
+5. **Point your tools at it:**
+   ```sh
+   zs-proxy connect
+   ```
+   This detects installed AI tools and writes their config for you. For anything it
+   doesn't know, use the OpenAI-compatible base URL `http://localhost:9376/v1` with any
+   API key (it's ignored). That's it. 😀
+
+→ [Quick start](https://docs.zerosignal.ai/using-the-proxy/quick-start)
 
 ## Install
+
+### macOS / Linux (one-line installer)
+
+```sh
+curl -fsSL https://zerosignal.ai/install.sh | sh
+```
+
+Downloads the right archive for your platform, verifies it against `checksums.txt`, and
+installs `zs-proxy` on your `PATH`. Pin a version with `ZS_VERSION=1.2.3` or change the
+target directory with `ZS_INSTALL_DIR`.
 
 ### macOS (Homebrew)
 
@@ -54,7 +78,7 @@ scoop bucket add txnlab https://github.com/txnlab/scoop-bucket
 scoop install zs-proxy
 ```
 
-### Linux / direct download
+### Direct download
 
 Grab the archive for your platform from the
 [latest release](https://github.com/txnlab/zs-proxy/releases/latest):
@@ -96,6 +120,9 @@ The wallet lives in your **OS keychain** (macOS Keychain / Windows Credential Ma
 Linux Secret Service) on signed releases. Inspect it with `zs-proxy wallet show` /
 `zs-proxy wallet address`, or reveal the phrase with `zs-proxy wallet export`.
 
+→ [Wallet & funding](https://docs.zerosignal.ai/using-the-proxy/wallet-and-funding) ·
+[Recovery](https://docs.zerosignal.ai/for-users/recovery)
+
 ## Funding
 
 The recommended path is to **sign in at [zerosignal.ai](https://zerosignal.ai), fund your
@@ -113,10 +140,12 @@ zs-proxy status     # wallet, balance, and funding status
 zs-proxy doctor     # diagnose config → wallet → chain → funding → port
 ```
 
+→ [Funding](https://docs.zerosignal.ai/using-the-proxy/wallet-and-funding#funding)
+
 ## Run the proxy
 
 `proxy start` backgrounds a self-managed daemon and returns you to the shell with the
-endpoint live on `:8080`:
+endpoint live on `127.0.0.1:9376`:
 
 ```sh
 zs-proxy proxy start              # start in the background
@@ -127,7 +156,7 @@ zs-proxy proxy restart            # restart the daemon
 zs-proxy proxy logs -f            # follow the daemon log (metadata only — never prompts or responses)
 ```
 
-`proxy start` accepts `--network`, `--port`, and `--config`. The background daemon does
+`proxy start` accepts `--port` and `--config`. The background daemon does
 **not** survive a reboot and isn't restarted on a crash — for that, install it as a service.
 
 ## Run as a service
@@ -136,7 +165,7 @@ To start at login/boot and restart on failure, register an OS service:
 
 ```sh
 zs-proxy proxy install-service                     # register + enable (current config)
-zs-proxy proxy install-service --network mainnet   # pin a --network / --config / --port
+zs-proxy proxy install-service --port 9376         # pin a --config / --port
 zs-proxy proxy install-service --print             # print the unit / command instead of installing
 zs-proxy proxy uninstall-service                   # stop + remove
 ```
@@ -150,23 +179,41 @@ you aren't elevated) and runs as the installing user.
 > **A wallet must already exist.** A service has no terminal to prompt on, so run
 > `zs-proxy wallet login` (or `zs-proxy` once interactively) before installing the service.
 
+→ [Running as a service](https://docs.zerosignal.ai/using-the-proxy/running-as-a-service)
+
 ## Connect your tools
 
-Configure any OpenAI-compatible client to use:
-
-- **Base URL:** `http://localhost:8080/v1`
-- **API key:** anything — it's ignored
-
-This is a drop-in OpenAI endpoint for opencode, LM Studio, the OpenAI SDKs, coding agents,
-and similar tools. Quick sanity checks:
+`zs-proxy connect` autoconfigures third-party AI tools to use the running proxy:
 
 ```sh
-curl http://localhost:8080/healthz
-curl http://localhost:8080/v1/models
+zs-proxy connect            # detect installed tools and configure them
+zs-proxy connect opencode   # configure just one
+zs-proxy connect --list     # show detected tools and the config paths they'd get
+zs-proxy connect --print    # render the config without writing anything
+```
+
+Known integrations: `opencode`, `openclaw`, `pi`, `hermes`, `aider`, `continue`, `codex`,
+and `generic`. Step-by-step guides — including GUI apps `connect` doesn't write for
+(SillyTavern, Open WebUI, LibreChat, Chatbox, Cherry Studio) — are in the
+[how-to guides](https://docs.zerosignal.ai/using-the-proxy/guides).
+
+For anything else, configure it manually as an OpenAI-compatible endpoint:
+
+- **Base URL:** `http://localhost:9376/v1`
+- **API key:** anything — it's ignored
+
+Quick sanity checks:
+
+```sh
+curl http://localhost:9376/healthz
+curl http://localhost:9376/v1/models
 ```
 
 Supported routes include `/v1/chat/completions`, `/v1/completions`, `/v1/responses`,
 `/v1/models`, and `/v1/images/*`.
+
+→ [Connecting AI tools](https://docs.zerosignal.ai/using-the-proxy/connecting-tools) ·
+[MCP servers](https://docs.zerosignal.ai/using-the-proxy/mcp)
 
 ## Command reference
 
@@ -188,25 +235,68 @@ zs-proxy fund [--wait]                                 # deposit address + QR + 
 zs-proxy status                                        # wallet, balance, funding status
 zs-proxy doctor                                        # end-to-end diagnostics
 
+# tools
+zs-proxy connect [tool]                                # autoconfigure AI tools to use the proxy
+
+# concurrency + the prepaid ticket pool
+zs-proxy slots [n]                                     # show or set how many tickets can be open at once
+zs-proxy withdraw <amount-algo>                        # reclaim unreserved ALGO from the pool
+zs-proxy close-deposit                                 # close the pool and refund the full balance
+
+# tickets
+zs-proxy tickets                                       # open escrow tickets and what can resolve them
+zs-proxy tickets get <ticket-id> | recover [ticket-id] # inspect / resolve one ticket
+
 # inspection
 zs-proxy config path | print-effective                 # resolved config path / merged config
-zs-proxy version                                        # product + proto versions + network ids
-zs-proxy --help                                         # full command tree
+zs-proxy version                                       # product + proto versions + network ids
+zs-proxy --help                                        # full command tree
 ```
 
-Global flags (valid on most commands): `--network mainnet|localnet`, `--port`,
-`--config <path>`, `--foreground`.
+Flags are bound per command, not globally: `--config <path>` is accepted by most
+commands, `--port` by the `proxy` lifecycle commands and `install-service`, and
+`--foreground` only by `proxy start`.
+
+→ [Proxy CLI reference](https://docs.zerosignal.ai/reference/cli-1) — every command and flag.
 
 ## Configuration
 
 No `config.yaml` is required — `zs-proxy` ships with embedded per-network defaults and
-boots on **mainnet** by default. Self-hosters can override with `--config <path>` or
-`PROXY_*` environment variables; inspect what's actually in effect with:
+boots on **mainnet** by default, listening on `127.0.0.1:9376`. Self-hosters can override
+with `--config <path>` or `PROXY_*` environment variables; inspect what's actually in
+effect with:
 
 ```sh
 zs-proxy config path              # which config file would be loaded
 zs-proxy config print-effective   # merged effective config (defaults + file + env + flags)
 ```
+
+`PROXY_CONFIG` sets the config path without passing `--config`, and
+`PROXY_ZS_CHECK_UPDATES=false` silences the once-daily "newer version available" notice.
+
+→ [Configuration](https://docs.zerosignal.ai/using-the-proxy/configuration) ·
+[Routing preferences](https://docs.zerosignal.ai/reference/routing-preferences)
+
+## Documentation
+
+| | |
+|---|---|
+| [What is the proxy](https://docs.zerosignal.ai/using-the-proxy/overview) | What it is, who it's for, how it relates to the chat app |
+| [Quick start](https://docs.zerosignal.ai/using-the-proxy/quick-start) | Install → start → fund → connect → first request |
+| [Connecting AI tools](https://docs.zerosignal.ai/using-the-proxy/connecting-tools) | The `connect` command, supported tools, manual setup |
+| [How-to guides](https://docs.zerosignal.ai/using-the-proxy/guides) | Per-app setup for opencode, Codex, Aider, SillyTavern, Open WebUI, LibreChat, … |
+| [MCP servers](https://docs.zerosignal.ai/using-the-proxy/mcp) | Using MCP through the proxy |
+| [Wallet & funding](https://docs.zerosignal.ai/using-the-proxy/wallet-and-funding) | The wallet, funding, withdrawals, the prepaid ticket pool |
+| [Configuration](https://docs.zerosignal.ai/using-the-proxy/configuration) | `config.yaml`, env overrides, spend caps, operator selection |
+| [Running as a service](https://docs.zerosignal.ai/using-the-proxy/running-as-a-service) | launchd / systemd / Windows service |
+| [Proxy CLI reference](https://docs.zerosignal.ai/reference/cli-1) | Every command and flag |
+| [Routing preferences](https://docs.zerosignal.ai/reference/routing-preferences) | Pin operators, price ceilings, per-request relay |
+| [Pricing](https://docs.zerosignal.ai/for-users/pricing) | What a request costs and how the fee breaks down |
+| [Privacy & security](https://docs.zerosignal.ai/for-users/privacy) | End-to-end encryption, relays, what each party sees |
+| [Troubleshooting](https://docs.zerosignal.ai/for-users/troubleshooting#using-the-proxy) | Common problems and fixes |
+
+Running a node instead of using one? See the
+[operator guide](https://docs.zerosignal.ai/for-operators/what-is-an-operator).
 
 ## License
 
