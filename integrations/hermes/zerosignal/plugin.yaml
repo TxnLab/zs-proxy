@@ -1,0 +1,5 @@
+name: zerosignal-provider
+kind: model-provider
+version: 1.0.0
+description: ZeroSignal (private pay-per-use inference through the local zs-proxy daemon)
+author: TxnLab
