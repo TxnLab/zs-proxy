@@ -9,6 +9,55 @@ the canonical downloads for the installer script, Homebrew, and Scoop.
 📖 **Full documentation: [docs.zerosignal.ai](https://docs.zerosignal.ai/using-the-proxy/overview)** —
 this README is a condensed version of those pages.
 
+## Get started
+
+1. **Create and fund your account at [zerosignal.ai](https://zerosignal.ai).** Create a
+   passkey, then add funds with a card, Apple Pay, Google Pay, or crypto. Already have a
+   funded chat-app account? Skip this step.
+
+2. **Install.** On macOS:
+   ```sh
+   brew install txnlab/tap/zs-proxy
+   ```
+   On Linux, or macOS without Homebrew:
+   ```sh
+   curl -fsSL https://zerosignal.ai/install.sh | sh
+   ```
+   If the installer says its directory isn't on your `PATH`, add the line it prints.
+   Windows uses Scoop; see [Install](#install).
+
+3. **Sign in:**
+   ```sh
+   zs-proxy wallet login
+   ```
+   Your browser opens zerosignal.ai. Note the address under **This account**, then
+   approve with your passkey. Back in the terminal, answer `y` if it shows the same
+   address. The
+   proxy now uses the same account and balance as the chat app. Your recovery phrase goes
+   straight from the browser to the CLI on your computer, never through a server.
+
+4. **Start the proxy:**
+   ```sh
+   zs-proxy proxy start
+   ```
+   It runs in the background at `http://localhost:9376/v1`.
+
+5. **Connect your tools:**
+   ```sh
+   zs-proxy connect
+   ```
+   This finds the AI tools you have installed and points them at the proxy. For any
+   other OpenAI-compatible tool, use base URL `http://localhost:9376/v1` and any API key
+   (the proxy ignores it).
+
+6. **Check it:** `zs-proxy status` shows the account, its balance, and whether it's
+   ready to pay for requests.
+
+Setting up over SSH, on a server, or with a separate wallet for an agent? See
+[Advanced: other wallet setups](#advanced-other-wallet-setups).
+
+→ [Quick start](https://docs.zerosignal.ai/using-the-proxy/quick-start)
+
 ## How it works
 
 `zs-proxy` is a small **localhost daemon** that serves exactly one user — you —
@@ -23,29 +72,6 @@ on-chain account, not a static key. So any non-empty API key works in your clien
 → [What is the proxy](https://docs.zerosignal.ai/using-the-proxy/overview) ·
 [Privacy & security](https://docs.zerosignal.ai/for-users/privacy) ·
 [Pricing](https://docs.zerosignal.ai/for-users/pricing)
-
-## Quick start
-
-1. **Create + fund an account** at [zerosignal.ai](https://zerosignal.ai).
-2. **Install** `zs-proxy` (see [Install](#install)).
-3. **Import your account** into the proxy:
-   ```sh
-   zs-proxy wallet login
-   ```
-   (or just run `zs-proxy` once and follow the first-run prompt)
-4. **Start the proxy:**
-   ```sh
-   zs-proxy proxy start
-   ```
-5. **Point your tools at it:**
-   ```sh
-   zs-proxy connect
-   ```
-   This detects installed AI tools and writes their config for you. For anything it
-   doesn't know, use the OpenAI-compatible base URL `http://localhost:9376/v1` with any
-   API key (it's ignored). That's it. 😀
-
-→ [Quick start](https://docs.zerosignal.ai/using-the-proxy/quick-start)
 
 ## Install
 
@@ -91,57 +117,6 @@ Grab the archive for your platform from the
 
 Verify against `checksums.txt`, extract, and put `zs-proxy` on your `PATH`.
 
-## Set up your account
-
-Your `zs-proxy` wallet and the [zerosignal.ai](https://zerosignal.ai) web app are the
-**same account** — create and fund it once on the web, then import it into the proxy.
-
-The easiest import is a browser sign-in (no paste):
-
-```sh
-zs-proxy wallet login
-```
-
-This opens [zerosignal.ai](https://zerosignal.ai), you approve the handoff with your
-passkey, and the recovery phrase is delivered back over a one-shot `localhost` listener —
-it never touches a remote server. The derived address is identical to a manual import, so
-the CLI and the browser app share one funded account. On a headless/SSH host, add
-`--no-browser` to print the sign-in URL instead.
-
-Other ways to set up the wallet:
-
-```sh
-zs-proxy wallet import     # paste the 24-word recovery phrase (web app → Settings → Recovery)
-zs-proxy wallet new        # generate a fresh 24-word wallet (also importable into the web app)
-zs-proxy                   # bare first run: interactive wallet bootstrap on the terminal
-```
-
-The wallet lives in your **OS keychain** (macOS Keychain / Windows Credential Manager /
-Linux Secret Service) on signed releases. Inspect it with `zs-proxy wallet show` /
-`zs-proxy wallet address`, or reveal the phrase with `zs-proxy wallet export`.
-
-→ [Wallet & funding](https://docs.zerosignal.ai/using-the-proxy/wallet-and-funding) ·
-[Recovery](https://docs.zerosignal.ai/for-users/recovery)
-
-## Funding
-
-The recommended path is to **sign in at [zerosignal.ai](https://zerosignal.ai), fund your
-account in the web ui, then run `zs-proxy wallet login`** — the proxy then signs-in with the same account, so funding on the web funds the proxy. You can also fund from the CLI:
-
-```sh
-zs-proxy fund            # deposit address + QR + on-ramp links
-zs-proxy fund --wait     # poll until ALGO arrives, then opt in to USDC (which the web ui handles for you, as well as automatically converting the ALGO to USDC)
-```
-
-`zs-proxy` runs on **mainnet** by default. Confirm everything is ready with:
-
-```sh
-zs-proxy status     # wallet, balance, and funding status
-zs-proxy doctor     # diagnose config → wallet → chain → funding → port
-```
-
-→ [Funding](https://docs.zerosignal.ai/using-the-proxy/wallet-and-funding#funding)
-
 ## Run the proxy
 
 `proxy start` backgrounds a self-managed daemon and returns you to the shell with the
@@ -176,8 +151,10 @@ resolved path and your flags baked in. Installs are **per-user** so the service 
 your keychain wallet. On Windows this needs administrator rights (it raises a UAC prompt if
 you aren't elevated) and runs as the installing user.
 
-> **A wallet must already exist.** A service has no terminal to prompt on, so run
-> `zs-proxy wallet login` (or `zs-proxy` once interactively) before installing the service.
+> **Set up the wallet first.** A service has no terminal to prompt on, so it refuses to
+> run without a wallet, and `install-service` checks before installing anything. Run
+> `zs-proxy wallet login` first. (An env mnemonic in your shell doesn't count: the service
+> never sees your shell's environment.)
 
 → [Running as a service](https://docs.zerosignal.ai/using-the-proxy/running-as-a-service)
 
@@ -214,6 +191,47 @@ Supported routes include `/v1/chat/completions`, `/v1/completions`, `/v1/respons
 
 → [Connecting AI tools](https://docs.zerosignal.ai/using-the-proxy/connecting-tools) ·
 [MCP servers](https://docs.zerosignal.ai/using-the-proxy/mcp)
+
+## Advanced: other wallet setups
+
+[Get started](#get-started) signs the proxy in to your zerosignal.ai account, so both
+share one balance. Other ways to set up the wallet:
+
+```sh
+zs-proxy wallet login --no-browser   # SSH / headless: print the sign-in URL instead of opening it
+zs-proxy wallet import               # paste the 24-word phrase (web app → Settings → Recovery)
+zs-proxy wallet import --stdin       # ...or pipe it in, for scripts
+zs-proxy wallet new                  # a fresh, empty wallet that isn't your web account
+zs-proxy fund --wait                 # fund that wallet: deposit address + QR, then wait for it
+```
+
+- **`--no-browser`:** the sign-in finishes on a temporary `127.0.0.1` listener on the
+  machine running `zs-proxy`, at the `port=` in the printed URL, and waits 3 minutes. To
+  finish it from a browser on another computer, open a second SSH session from that
+  computer that forwards the port (`ssh -L <port>:127.0.0.1:<port> <host>`), then open the
+  URL. If you can't forward a port, use `wallet import` instead.
+- **One wallet per OS user.** To give an agent its own budget, run it under a separate OS
+  user or machine and use `wallet new` there, or give it an env mnemonic (below).
+- **Servers and CI:** set any `*_MNEMONIC` environment variable (a 24- or 25-word phrase),
+  or `ZS_MNEMONIC_URLS` to load it from AWS, GCP, or Azure secret stores. `proxy start`
+  then skips wallet setup entirely. The `status`, `fund`, `slots`, and `doctor` commands
+  read only the keychain wallet, so they don't work with an env mnemonic. An installed
+  service doesn't inherit your shell's environment either, so `install-service` refuses
+  without a keychain wallet; use `install-service --print` and add the variable to the
+  unit yourself.
+- **Switching accounts:** `wallet login` / `import` / `new` refuse to replace an existing
+  wallet unless you pass `--force`. A running proxy keeps paying from the old wallet until
+  you run `zs-proxy proxy restart`.
+- **No silent wallets:** with no wallet and no terminal to ask on (a service, a script,
+  piped input), the proxy exits with an error instead of creating an empty wallet.
+
+The wallet lives in your **OS keychain** (macOS Keychain / Windows Credential Manager /
+Linux Secret Service) on signed releases. Inspect it with `zs-proxy wallet show`, or reveal
+the phrase with `zs-proxy wallet export`.
+
+→ [Other ways to set up your wallet](https://docs.zerosignal.ai/using-the-proxy/wallet-and-funding#other-ways-to-set-up-your-wallet) ·
+[Funding](https://docs.zerosignal.ai/using-the-proxy/wallet-and-funding#funding) ·
+[Recovery](https://docs.zerosignal.ai/for-users/recovery)
 
 ## Command reference
 
@@ -282,11 +300,11 @@ zs-proxy config print-effective   # merged effective config (defaults + file + e
 | | |
 |---|---|
 | [What is the proxy](https://docs.zerosignal.ai/using-the-proxy/overview) | What it is, who it's for, how it relates to the chat app |
-| [Quick start](https://docs.zerosignal.ai/using-the-proxy/quick-start) | Install → start → fund → connect → first request |
+| [Quick start](https://docs.zerosignal.ai/using-the-proxy/quick-start) | Account → install → sign in → start → connect |
 | [Connecting AI tools](https://docs.zerosignal.ai/using-the-proxy/connecting-tools) | The `connect` command, supported tools, manual setup |
 | [How-to guides](https://docs.zerosignal.ai/using-the-proxy/guides) | Per-app setup for opencode, Codex, Aider, SillyTavern, Open WebUI, LibreChat, … |
 | [MCP servers](https://docs.zerosignal.ai/using-the-proxy/mcp) | Using MCP through the proxy |
-| [Wallet & funding](https://docs.zerosignal.ai/using-the-proxy/wallet-and-funding) | The wallet, funding, withdrawals, the prepaid ticket pool |
+| [Wallet & funding](https://docs.zerosignal.ai/using-the-proxy/wallet-and-funding) | Every way to set up a wallet, funding, the prepaid ticket pool |
 | [Configuration](https://docs.zerosignal.ai/using-the-proxy/configuration) | `config.yaml`, env overrides, spend caps, operator selection |
 | [Running as a service](https://docs.zerosignal.ai/using-the-proxy/running-as-a-service) | launchd / systemd / Windows service |
 | [Proxy CLI reference](https://docs.zerosignal.ai/reference/cli-1) | Every command and flag |
