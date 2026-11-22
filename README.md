@@ -2,9 +2,10 @@
 
 A drop-in, private, OpenAI-compatible inference proxy.
 
-This repository hosts the **prebuilt release binaries** for `zs-proxy`. The
+This repository holds the `zs-proxy` source and its signed release binaries. The
 binaries on the [Releases](https://github.com/txnlab/zs-proxy/releases) page are
-the canonical downloads for the installer script, Homebrew, and Scoop.
+the canonical downloads for the installer script, Homebrew, and Scoop. To build
+from source, see [Building from source](#building-from-source).
 
 📖 **Full documentation: [docs.zerosignal.ai](https://docs.zerosignal.ai/using-the-proxy/overview)** —
 this README is a condensed version of those pages.
@@ -316,11 +317,27 @@ zs-proxy config print-effective   # merged effective config (defaults + file + e
 Running a node instead of using one? See the
 [operator guide](https://docs.zerosignal.ai/for-operators/what-is-an-operator).
 
+## Building from source
+
+```sh
+go build -o zs-proxy .        # or: make zs-proxy   → out/zs-proxy
+go test ./...
+```
+
+Requires Go 1.27. The protocol, routing and payment logic live in the
+[ZeroSignal SDK](https://github.com/TxnLab/zerosignal) (`github.com/TxnLab/zerosignal/go/zs`);
+this module is the CLI, daemon and OS-service host around it. A build from source stores a
+new wallet in an encrypted file rather than the OS keychain, since only a code-signed binary
+can use the macOS Keychain without prompting.
+
+[`DEVELOPMENT.md`](./DEVELOPMENT.md) is the developer reference (HTTP surface, request flow,
+configuration internals), and [`RELEASE.md`](./RELEASE.md) covers signing and releasing.
+
 ## License
 
 [Apache License 2.0](./LICENSE).
 
 ---
 
-Releases are published automatically by [goreleaser](https://goreleaser.com).
+Releases are published by [goreleaser](https://goreleaser.com).
 The macOS binary is a code-signed, notarized universal binary.

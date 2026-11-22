@@ -1,0 +1,13 @@
+/config.yaml
+/out/
+/dist/
+/zs-proxy
+/.idea/
+# Per-release notes drafted by `make release-notes`, edited, then published as the
+# GitHub release body via `make release`. Ephemeral — write it fresh each release
+# so stale notes are never re-published.
+/RELEASE_NOTES.md
+# Repo-local release env, sourced by `make release` if present (Discord webhook
+# creds, etc.). Keeps secrets scoped to this repo instead of a machine-wide shell
+# profile. Never committed.
+/.env.release

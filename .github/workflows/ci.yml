@@ -1,0 +1,122 @@
+name: CI
+
+# On request, not on every push: the build and tests run locally before a push,
+# so an automatic run on each PR commit and again on main repeated work already
+# done. Dispatch it from the Actions tab, or label a PR `ci` to run it on that
+# PR and its later commits.
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled, synchronize, reopened]
+
+permissions:
+  contents: read
+
+# Cancel the older run when a newer commit lands on the same ref. Nothing here
+# mutates shared state, so this group is ref-scoped and cancelling is free —
+# it only reclaims runners.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build, vet, and test
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Deliberately NOT `go-version-file: go.mod`. setup-go passes the go
+      # directive straight to semver.satisfies as a range, and go.mod says
+      # `go 1.27.0`. As a range that matches only 1.27.0, so the module's
+      # minimum would silently become an exact CI pin that never picks up a Go
+      # patch release. `1.27.x` accepts any patch; bump it when moving
+      # to a new minor.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.x'
+
+      # setup-go takes a 1.27 patch from the runner's cache or its own
+      # manifest, both of which trail go.dev after a release, and it exports
+      # GOTOOLCHAIN=local so the go command stays on it. Setting GOTOOLCHAIN
+      # to the newest patch makes the go command fetch that one itself,
+      # checked against the Go checksum database. The list is not checked, so
+      # only a bare version from it reaches GITHUB_ENV.
+      - name: Use the newest Go patch
+        run: |
+          minor="$(go env GOVERSION | cut -d. -f1-2)"
+          tc="$(curl -fsSL --max-time 30 --retry 3 --proto '=https' 'https://go.dev/dl/?mode=json' | jq -r --arg m "$minor." '[.[].version | select(startswith($m))] | first')"
+          [[ "$tc" =~ ^go1\.[0-9]+\.[0-9]+$ ]] || { echo "::error::go.dev lists no supported $minor release"; exit 1; }
+          echo "GOTOOLCHAIN=$tc" >> "$GITHUB_ENV"
+
+      # The published `curl | sh` installer and the release toolchain resolver.
+      # shellcheck ships preinstalled on ubuntu-latest, and it picks the dialect
+      # from the shebang — both are /bin/sh, unlike the bash scripts beside them.
+      - name: Shellcheck the installer and release scripts
+        run: shellcheck scripts/install.sh scripts/release-toolchain.sh
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      # The steps above only ever see linux/amd64, but the OS-service layer is
+      # build-tagged per platform (service_windows.go, elevate_windows.go, the
+      # _other.go stubs), so the SCM and launchd paths compile nowhere in this
+      # job. These are the platforms .goreleaser.yaml ships. `go vet` also
+      # type-checks _test.go files, which is what reaches service_windows_test.go.
+      - name: Cross-compile and vet the release platforms
+        run: |
+          for target in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64 linux/arm64; do
+            echo "::group::${target}"
+            GOOS="${target%/*}" GOARCH="${target#*/}" go build ./...
+            GOOS="${target%/*}" GOARCH="${target#*/}" go vet ./...
+            echo "::endgroup::"
+          done
+
+      # Subsumed by the race job's run, and kept anyway: it finishes in a
+      # fraction of the time, so an ordinary logic break is reported here
+      # while the instrumented run is still going.
+      - name: Test
+        run: go test ./...
+
+  race:
+    name: Race test
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'ci')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # Deliberately NOT `go-version-file: go.mod`. setup-go passes the go
+      # directive straight to semver.satisfies as a range, and go.mod says
+      # `go 1.27.0`. As a range that matches only 1.27.0, so the module's
+      # minimum would silently become an exact CI pin that never picks up a Go
+      # patch release. `1.27.x` accepts any patch; bump it when moving
+      # to a new minor.
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.x'
+
+      # setup-go takes a 1.27 patch from the runner's cache or its own
+      # manifest, both of which trail go.dev after a release, and it exports
+      # GOTOOLCHAIN=local so the go command stays on it. Setting GOTOOLCHAIN
+      # to the newest patch makes the go command fetch that one itself,
+      # checked against the Go checksum database. The list is not checked, so
+      # only a bare version from it reaches GITHUB_ENV.
+      - name: Use the newest Go patch
+        run: |
+          minor="$(go env GOVERSION | cut -d. -f1-2)"
+          tc="$(curl -fsSL --max-time 30 --retry 3 --proto '=https' 'https://go.dev/dl/?mode=json' | jq -r --arg m "$minor." '[.[].version | select(startswith($m))] | first')"
+          [[ "$tc" =~ ^go1\.[0-9]+\.[0-9]+$ ]] || { echo "::error::go.dev lists no supported $minor release"; exit 1; }
+          echo "GOTOOLCHAIN=$tc" >> "$GITHUB_ENV"
+
+      - name: Test with race detector
+        run: go test -race ./...

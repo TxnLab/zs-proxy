@@ -1,0 +1,184 @@
+# goreleaser config for the zs-proxy CLI.
+# Validate: `goreleaser check`   Dry-run: `goreleaser release --snapshot --clean`
+version: 2
+
+project_name: zs-proxy
+
+# THE RELEASE MUST BUILD FROM THE PIN, NOT FROM THE DEVELOPER'S WORKSPACE.
+#
+# This repo is normally checked out beside the proto repo under a go.work that
+# `use`s ./proto/go, and a workspace's `use` OVERRIDES the go.mod require. Since
+# goreleaser runs here, in that tree, `go build` resolves the protocol module to
+# whatever is on the developer's disk — uncommitted edits included — while
+# go.mod says a pseudo-version. Verified: `go list -m …/zerosignal/go` prints a
+# bare module path under the workspace and the pinned version under GOWORK=off.
+#
+# So without this line the published binaries are built from source that exists
+# on ONE machine, and the two-publish-gate discipline the go.mod pin exists to
+# enforce is bypassed for exactly the artifact users download. CI is unaffected
+# — it checks out this repo alone, where no go.work exists — which is what makes
+# the divergence quiet: CI and the released binaries build from different source
+# and both look fine.
+#
+# It is set at the top level so it reaches the `before` hooks too. `go mod tidy`
+# under an active workspace resolves imports the same way.
+env:
+  - GOWORK=off
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  # macOS: the OS Keychain backend (99designs/keyring → keybase/go-keychain) is
+  # build-tagged `darwin && cgo`, so darwin MUST build with CGO enabled, on a
+  # macOS runner. Without it the keychain backend is stubbed out at runtime.
+  - id: darwin
+    binary: zs-proxy
+    main: .
+    env:
+      - CGO_ENABLED=1
+    goos: [darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: &ldflags
+      - -s -w
+      - -X github.com/TxnLab/zs-proxy/internal/build.Version={{ .Version }}
+      - -X github.com/TxnLab/zs-proxy/internal/build.Commit={{ .ShortCommit }}
+      # Wallet backend selector. NOTE: although this line sits in the darwin
+      # build, the `cross` build (linux+windows) reuses it via the *ldflags
+      # alias, so KeyringBackend=os is stamped into ALL THREE platforms
+      # (verified: the value lands in every binary). "os" = keyring's per-OS
+      # keychain — macOS Keychain (needs the code signature), Windows Credential
+      # Manager / DPAPI, Linux Secret Service. Unset/dev builds default to the
+      # encrypted file backend.
+      - -X github.com/TxnLab/zs-proxy/internal/build.KeyringBackend=os
+
+  # linux + windows use the pure-Go Secret Service / Credential Manager / file
+  # backends, so they cross-compile with CGO disabled.
+  - id: cross
+    binary: zs-proxy
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, windows]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: *ldflags
+
+# Combine the two darwin slices into a single universal binary and code-sign it.
+universal_binaries:
+  - id: darwin
+    replace: true
+    hooks:
+      post:
+        - ./scripts/sign-macos.sh "{{ .Path }}"
+
+archives:
+  # NOTE: this naming scheme, and the flat (unwrapped) archive layout, are a
+  # PUBLIC CONTRACT now — scripts/install.sh constructs the asset name from them
+  # at runtime, and an old cached copy of that script keeps installing new
+  # releases only while they hold. Changing either breaks every installer
+  # already in someone's shell history, not just the next release.
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-dev"
+
+# Homebrew now distributes prebuilt CLI binaries as casks (formulae build from
+# source). `brew services` is formula-only, so the cask can't register a launchd
+# service itself — instead the binary emits its own unit via `proxy
+# install-service` (the caveat points there). The `zs` alias and shell
+# completions are still a follow-up.
+homebrew_casks:
+  - name: zs-proxy
+    repository:
+      owner: txnlab
+      name: homebrew-tap
+    homepage: "https://github.com/txnlab/zs-proxy"
+    description: "Drop-in, private, OpenAI-compatible inference proxy for ZeroSignal.ai"
+    caveats: |
+      To run zs-proxy at login and restart it on failure (Homebrew casks can't
+      use `brew services`, which is formula-only):
+        zs-proxy proxy install-service
+      It installs + enables a launchd LaunchAgent with the binary's own path
+      baked in. `zs-proxy proxy uninstall-service` removes it.
+
+# Scoop (Windows) — publishes a manifest to the public txnlab/scoop-bucket repo.
+# The windows .zip archives are built + uploaded to the zs-proxy release either
+# way; this adds `scoop install` on top.
+scoops:
+  - name: zs-proxy
+    repository:
+      owner: txnlab
+      name: scoop-bucket
+    homepage: "https://github.com/txnlab/zs-proxy"
+    description: "Drop-in, private, OpenAI-compatible inference proxy for ZeroSignal.ai"
+    license: Apache-2.0
+
+release:
+  # Named explicitly rather than inferred from the git remote, so a release cut
+  # from a fork or a clone with a different origin still publishes here, where
+  # the cask, the Scoop manifest, install.sh and the update checker look.
+  github:
+    owner: txnlab
+    name: zs-proxy
+  draft: false
+  # The `curl | sh` installer ships as a release asset, so users run the copy a
+  # release carried, not whatever is on main. https://zerosignal.ai/install.sh redirects to
+  # .../releases/latest/download/install.sh. Note that means a new release
+  # publishes the script the instant it goes out; a script-only fix can be
+  # pushed without a release via `gh release upload <tag> scripts/install.sh
+  # --repo txnlab/zs-proxy --clobber`.
+  extra_files:
+    - glob: ./scripts/install.sh
+  # goreleaser defaults to mode: keep-existing, which KEEPS the notes of an
+  # already-existing release for the tag and only re-uploads artifacts — so a
+  # re-run silently ignores --release-notes and leaves an empty body (GitHub
+  # then shows the repo's HEAD commit subject instead). `replace` makes
+  # a re-run overwrite the body with RELEASE_NOTES.md.
+  mode: replace
+
+# The release body is the curated RELEASE_NOTES.md (`make release-notes`), not
+# a list of commit subjects: users read it, and the Discord embed reuses it.
+changelog:
+  disable: true
+
+# Announce each real release to the shared ZeroSignal #releases Discord channel.
+# Fires at the very end of `goreleaser release` (real releases only — snapshot /
+# build never announce). The changelog above is disabled, so goreleaser has no
+# `.ReleaseNotes` of its own to post here — so `make release` hands the curated
+# RELEASE_NOTES.md in via $ZS_RELEASE_NOTES (Discord caps embed descriptions at
+# 4096 chars; the Makefile truncates). Webhook creds are DISCORD_WEBHOOK_ID /
+# DISCORD_WEBHOOK_TOKEN — the two halves of the channel's webhook URL
+# https://discord.com/api/webhooks/<ID>/<TOKEN>. The announce is OPT-IN:
+# ZS_ANNOUNCE_SKIP defaults to "true" and `make release` flips it to "false" only
+# when both creds are present, so a creds-less release doesn't fail at the
+# announce step after the artifacts are already public. `author` labels the
+# project so zs-proxy and zs-node stay distinguishable in the one shared channel.
+announce:
+  skip: '{{ envOrDefault "ZS_ANNOUNCE_SKIP" "true" }}'
+  discord:
+    enabled: true
+    author: "zs-proxy releases"
+    # Embed author icon. MUST be set: goreleaser defaults an empty icon_url to its
+    # OWN mascot (goreleaser.com/static/avatar.png), so leaving it blank puts the
+    # gopher on our release posts. Points at logo.png at the root of this repo's
+    # main branch, so keep it there — the same ZeroSignal mark
+    # used for the webhook avatar. Discord needs a raster PNG, not the SVG favicon.
+    icon_url: "https://raw.githubusercontent.com/txnlab/zs-proxy/main/logo.png"
+    color: "5793266"
+    message_template: |-
+      ## {{ .ProjectName }} {{ .Tag }}
+
+      {{ envOrDefault "ZS_RELEASE_NOTES" "" }}
+
+      📦 [Downloads]({{ .ReleaseURL }})

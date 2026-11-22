@@ -1,0 +1,476 @@
+server:
+  listen: "127.0.0.1:9376"
+  read_timeout: "30s"
+  write_timeout: "0s"         # 0 = disabled; required for long SSE streams
+  idle_timeout: "120s"
+
+# Algorand node (algod) selection. Required.
+# Setting `network` alone is enough — it picks a sensible default endpoint
+# (nodely.dev for testnet/mainnet, http://localhost:4001 for localnet) and
+# token. `endpoint` and `token` are optional overrides for private nodes or
+# paid API tiers.
+algod:
+  network: ""                 # localnet | testnet | mainnet (leave empty to disable)
+  endpoint: ""                # optional override — takes precedence over the network default
+  token: ""                   # optional override — prefer PROXY_ALGOD_TOKEN env
+                              # (setting token alone for a paid nodely.dev tier is fine and
+                              # does not trigger the endpoint-override startup warning)
+
+# Solana rail. Setting `cluster` or `rpc_endpoint` pays on Solana instead of
+# Algorand; the algod block and zs.escrow_app_id must then be empty.
+# `--network solana-devnet` / `solana-localnet` set the cluster for one run.
+# The wallet pays with its 24-word phrase's Solana key (m/44'/501'/0'/0', the
+# address Phantom shows); a 25-word Algorand mnemonic has none.
+solana:
+  cluster: ""                 # devnet | localnet (leave empty for Algorand)
+  rpc_endpoint: ""            # optional override, used verbatim (a provider key may ride in it)
+  program: ""                 # optional zs_escrow program id (base58); empty takes the cluster's
+
+logging:
+  level: "info"               # debug | info | warn | error
+  format: "text"              # text | json
+
+# Spend caps — your own aggregate safety net on top of the network's
+# per-request price ceiling, so a runaway agent or loop can't quietly drain the
+# wallet. Both are whole USDC; 0 (the default) means unlimited for that axis.
+# daily_cap_usdc bounds your total spend for the UTC day and resets at midnight
+# UTC; per_request_cap_usdc refuses any single request whose price ceiling
+# exceeds it, before it's sent. `zs-proxy status` shows today's spend against
+# these. Also settable via PROXY_SPEND_DAILY_CAP_USDC /
+# PROXY_SPEND_PER_REQUEST_CAP_USDC (env wins over this file).
+#spend:
+#  daily_cap_usdc: 0           # e.g. 25.00 — max total USDC/day (0 = unlimited)
+#  per_request_cap_usdc: 0     # e.g. 1.50 — max USDC per request (0 = unlimited)
+
+zs:
+  affinity_policy: "prefer"                      # prefer | strict | none — tool-call continuation routing
+  affinity_ttl: "10m"                            # how long a tool_call_id stays bound to an operator
+  affinity_max: 1024                             # bounded LRU size for the affinity cache
+
+  # Operator selection. Operators are fetched from the ZeroSignalEscrow contract
+  # at startup - owner addresses, age public keys, and base URLs all come
+  # from on-chain boxes. operator_ids is an optional allowlist:
+  #   - omit or leave empty to use ALL currently-registered operators
+  #   - list specific IDs to restrict which operators the proxy tries
+  #operator_ids: [1, 2]                          # omit to fetch all registered operators
+
+  # Registry refresh. The proxy keeps its view of the operator set in
+  # sync with chain + node state by (a) running a background refresh
+  # every refresh_interval and (b) forcing a synchronous refresh on
+  # the next registry read once a snapshot exceeds max_cache_age.
+  # Failed refreshes are logged and the previous snapshot is retained,
+  # so transient chain / node outages don't surface as registry
+  # errors. Leave defaults unless you specifically need faster pickup
+  # of new operators or slower polling against algod.
+  refresh_interval: "5m"                         # background cadence
+  refresh_timeout: "30s"                         # bounds one cycle
+  max_cache_age: "15m"                           # hard ceiling — next read forces refresh past this
+  details_timeout: "2s"                          # per-operator /v1/zs/details probe
+  reserve_timeout: "5s"                          # per-operator POST /v1/zs/reserve; raise (10–30s) for cross-internet operators whose ComposeOpenGroup simulation is slow
+
+  # Bounded probing. Once the fleet is larger than probe_budget, a refresh
+  # cycle probes only a subset of nodes and the rest keep advertising their
+  # last-probed capabilities until max_carry_age expires. The defaults suit a
+  # fleet of ~100 nodes; the constraint that actually bites on a larger one is
+  # that max_carry_age MUST exceed the sweep period
+  # (~ node_count / probe_budget × refresh_interval), or nodes flicker in and
+  # out of /v1/models between sweeps. Keep
+  # probe_budget / details_concurrency × details_timeout under refresh_timeout
+  # so a cycle finishes inside its deadline.
+  #max_carry_age: "90m"                          # how long an unprobed node keeps advertising its last-known capabilities
+  #probe_budget: 96                              # max details probes per background refresh (fleets at or under this are probed in full)
+  #target_topk: 8                                # fastest known servers of a demanded model that a bounded cycle re-probes
+  #details_concurrency: 24                       # probe fan-out cap within one cycle
+
+  # Discovery catalog persistence. The last-known fleet is written to disk so a
+  # restart warm-starts from it instead of rediscovering operators over several
+  # probe cycles. Empty (the default) resolves to
+  # <state-dir>/operator-catalog-<deployment>.json (for example
+  # operator-catalog-algorand-mainnet-<app id>.json), one file per network;
+  # "off" disables persistence; any other value is used verbatim, and is then
+  # shared by every network this config runs on.
+  #catalog_path: ""                              # "" = <state-dir>/operator-catalog-<deployment>.json, "off" = disabled
+
+  # Hard backstop on the live entry count of each client-observed latency EWMA
+  # map (on top of the natural staleness prune). The (relay,target) pair map is
+  # the O(n²)-shaped one, so this is what bounds memory on a large fleet.
+  #latency_state_max: 4096                       # per-map cap on latency EWMA entries
+
+  # Each of the six knobs above is also settable as PROXY_ZS_<UPPERCASE_NAME>
+  # (PROXY_ZS_MAX_CARRY_AGE, PROXY_ZS_PROBE_BUDGET, …); env wins over this file.
+
+  # max_output_tokens defaults, used when the request body omits
+  # max_tokens / max_completion_tokens / max_output_tokens (standard
+  # Chat Completions treats the field as optional, so most clients —
+  # IDEs, SDKs — never send it). The node needs a concrete ceiling to
+  # compute max_price, so the proxy supplies one. Precedence:
+  #   1. an explicit value in the request body (always wins)
+  #   2. a per-model entry in default_max_output_tokens below
+  #   3. fallback_max_output_tokens (the global catch-all)
+  # Case 3 is not a flat ceiling: the proxy sizes the reserve per-operator
+  # from each operator's declared capacity (a declared max_output_tokens
+  # verbatim, else clamp(context_window/4, 256, this value), else this
+  # value), so a small-window operator isn't excluded on a guessed ceiling
+  # it never has to honor.
+  # Input tokens are estimated by a model-agnostic safe upper bound
+  # (~bytes/2 + image tile cost + flat margin); escrow + the operator's
+  # signed receipt settle for actual usage and refund the unspent
+  # reserve margin, so an over-generous ceiling only widens the
+  # (recovered) reserve — per-model accuracy isn't required here, and
+  # runaway spend stays bounded by the spend caps above (when you set them).
+  # Leave this at the default unless you know why you're changing it: the
+  # eligibility filter runs on the DERIVED number, so a proxy-only ceiling
+  # makes this proxy disagree with the chat client about which operators
+  # can serve the same request.
+  fallback_max_output_tokens: 32768               # global catch-all; set to 0 to fail closed (reject omitting callers with max_output_required)
+  default_max_output_tokens:                      # optional per-model overrides of the fallback
+    gpt-4o-mini: 4096
+    gpt-4o: 16384
+    qwen2.5-coder-32b-instruct: 4096
+    google/gemma-3-27b-it: 4096
+
+  # Payment: per request, the operator returns a pre-signed 2-tx open
+  # group on the reserve response (gtxn[1] = the ZeroSignalEscrow.open AppCall
+  # signed by the operator; gtxn[0] = a USDC-payment template). The proxy
+  # signs gtxn[0] as the payer and submits the group, then threads the
+  # open() app-call txid (group member 1) through the envelope — algod's
+  # pending-txn lookup is keyed on a real txid, not on the group id. The
+  # group id is retained proxy-side on the OpenHandle for audit/dispute
+  # logging. The per-ticket box MBR is drawn from the payer's prepaid pool
+  # (see concurrent_slots), not a per-request funding leg. Requires
+  # escrow_app_id below, a loaded keystore (see the mnemonic note at the
+  # bottom of this file), and a resolved algod connection (top-level
+  # `algod:` block — setting algod.network is usually enough).
+  # proxy_payer_addr is optional when exactly one mnemonic is loaded — the
+  # proxy auto-derives it from that lone entry. It MUST be set when two or
+  # more mnemonics are loaded (to disambiguate which one signs).
+  # escrow_app_id: 3628061142                 # deployed ZeroSignalEscrow app id
+  #proxy_payer_addr: "ALGORAND58CHARADDRESS..."    # optional with one mnemonic; required with multiple
+  #settlement_grace: "60s"                         # informational — contract enforces canonical
+
+  # How many escrow tickets this payer can hold open at once — raise it if
+  # you run a lot of requests in parallel (several agents, wide tool fan-out).
+  # The mechanism is funding, not a limiter: each ticket box needs a
+  # min-balance reserve, and rather than fund that per request the payer keeps
+  # a prepaid pool in the escrow app (opted in once) sized to this many boxes.
+  # The pool is established lazily on the first served request and resized by
+  # `zs-proxy slots <n>`, which writes this value and funds/reclaims to match.
+  # The box MBR is recoverable — `zs-proxy withdraw <algo>` reclaims the
+  # unreserved balance and `zs-proxy close-deposit` closes the pool entirely.
+  # 0 falls back to the built-in default (10). Override via
+  # PROXY_ZS_CONCURRENT_SLOTS.
+  #
+  # RENAMED — was mbr_deposit_slots. The old key is no longer read at all, so
+  # a config still using it silently falls back to the default 10.
+  #concurrent_slots: 10                            # concurrent open tickets
+
+  # Transport privacy (single-hop operator-as-relay, SPEC §3f): every
+  # operator-bound request routes through another operator so the target never
+  # sees the proxy's IP. Unset, it is on, except on the localnet preset at a
+  # loopback endpoint, where the one node has no relay beside it and requests
+  # go direct. Set false (or PROXY_ZS_PRIVACY=false) to talk directly to the
+  # target, or true to require a relay on localnet too.
+  #privacy: true
+  # Whether a caller may weaken its own privacy per request via
+  # `provider.relay: "off"` (or the X-Zs-Relay header), which skips the relay
+  # and sends direct. `provider` is a per-request routing hint on the request
+  # body, not a section of this file — the proxy strips it before sealing, so it
+  # never reaches the node or the upstream LLM. See "Routing preferences" in
+  # README.md (docs: proxy/routing-preferences.md) for the full field list.
+  # Default true (single-user payer process). Set false (or
+  # PROXY_ZS_ALLOW_PRIVACY_OVERRIDE=false) to refuse caller opt-outs — e.g.
+  # when the proxy is exposed to other local apps. `relay: "required"` (force a
+  # relay) is always honored regardless of this knob.
+  #allow_privacy_override: true
+
+  # SSRF guard. The proxy is co-located with the user, so its localhost is the
+  # user's machine; it dials operator-registered base URLs (a relay hop in
+  # privacy mode, or the target directly) plus reserve + discovery probes. By
+  # default those clients refuse a target resolving to a private / loopback /
+  # link-local / CGNAT / ULA address. Unset, the guard is off only on the
+  # localnet preset at a loopback endpoint, whose node is on this machine. Set
+  # true (or PROXY_ZS_ALLOW_PRIVATE_OPERATORS=true) for another dev setup, or
+  # false to keep the guard on localnet too.
+  #allow_private_operators: false
+
+  # Staging nodes. Operators can flag a node on-chain as `staging` (held out of
+  # production routing) to test it without serving real traffic. By default the
+  # proxy neither routes to a staging node nor ADVERTISES one: a model served
+  # only by staging nodes is absent from /v1/models and /v1/models/{id}, does not
+  # contribute to the aggregate on /v1/zs/details (so it can't set the advertised
+  # context window or "from $X" price), and its node is absent from
+  # /v1/zs/operators. Set true (or PROXY_ZS_ALLOW_STAGING=true, or
+  # `--allow-staging` on `proxy start`) to route to them and see them — e.g. to
+  # validate your own node before flipping it live; each one is then marked
+  # `"staging": true` on /v1/zs/operators. Staging nodes are still used as relays
+  # either way (a relay forwards bytes and runs no inference).
+  # Mirrors the client's Model Routing "allow staging" toggle.
+  #allow_staging: false
+
+  # Confidential mode (TEE) verification of operator attestation evidence.
+  # Operators that don't advertise TEE on /v1/zs/details are unaffected
+  # by everything in this block. See TEE.md in TxnLab/zerosignal for the
+  # threat model and https://docs.zerosignal.ai/concepts/confidential-compute
+  # for the operator-facing picture. The proxy fetches
+  # /v1/zs/attestation from each TEE-advertising operator at registry
+  # refresh time and stamps a TEEStatus (Verified + FailureTag) on the
+  # operator. Routing only filters on that status when a request actually
+  # requires TEE — see require_for_models below and the per-request
+  # X-Zs-Require-TEE header.
+  tee:
+    # verifier: which verifier IMPLEMENTATION to use — not which TEE
+    # platform. The platform is read from the quote's own bytes and needs
+    # no configuration here; writing "dstack-tdx" or "sev-snp" fails to
+    # load. "builtin" is the only kind wired, and empty defaults to it,
+    # so there is normally no reason to set this at all.
+    #
+    # "nras" is still accepted as an alias for "builtin" — it was the
+    # original name, and a misleading one, since the working path is
+    # Intel TDX and never contacts NVIDIA's attestation service. Prefer
+    # "builtin" in new files.
+    #
+    # Note what this field does NOT gate: which dstack nodes verify is
+    # decided by the allowlists and the release match below, not by this.
+    verifier: "builtin"
+
+    # allow_stub: accept tee.mode=stub bundles from operators. Stub mode
+    # produces deterministic, well-formed-but-untrusted evidence and is
+    # ONLY for end-to-end pipeline tests on a developer laptop without
+    # H100 hardware. Production deployments MUST leave this false. A stub
+    # bundle it accepts counts as verified, never as attested, so a stub
+    # node still receives no TEE-required traffic; but anything showing
+    # the verified bit would report a stub node as verified. The proxy
+    # logs a startup notice whenever this is true.
+    allow_stub: false
+
+    # require_for_models: blanket policy that forces TEE-attested routing
+    # for every request whose model id appears in this list, regardless of
+    # whether the client sent the X-Zs-Require-TEE header. Use this for
+    # models you serve under regulatory regimes that mandate operator-
+    # cannot-read-content as an attestable property. Case-sensitive —
+    # match the on-the-wire model id. If a model is in this list but no
+    # operator serving it is currently TEE-attested, requests for it return
+    # 503 service_unavailable / no_tee_capacity rather than silently
+    # routing to a non-attested operator.
+    require_for_models: []
+    # Example:
+    # require_for_models:
+    #   - gpt-4o
+    #   - qwen2.5-coder-32b-instruct
+
+    # The measurement allowlists. A quote's signature says "some software
+    # in a real TEE asked me to sign these bytes"; only matching its
+    # measurement against a reference says WHICH software, and that is
+    # what the whole key-binding guarantee rests on, because report_data
+    # is signed blindly.
+    #
+    # EMPTY MEANS NOTHING VERIFIES, deliberately. Read as "accept
+    # anything" it would make an unconfigured proxy accept a quote from
+    # any CVM running any image — precisely the check being skipped,
+    # while looking exactly like the feature working.
+    #
+    # trusted_os_images SHIPS PRESET with the production dstack guest
+    # images and normally needs no entry here. The value is identical for
+    # every operator on a dstack release and names Phala's guest image
+    # rather than anyone's software, so pasting it bought nothing. It is
+    # also the check that catches a quote taken on a dstack-dev-* image,
+    # where every other check passes identically while the platform's
+    # hardening guarantees do not hold. Setting it here REPLACES the
+    # preset; setting it to [] turns the check off, which means dstack
+    # evidence stops verifying rather than starting to verify freely.
+    #
+    # trusted_compose_hashes has no preset and cannot have one: the hash
+    # covers the whole document, so it is per-deployment and moves on
+    # every config edit. MOST PROXIES SHOULD LEAVE IT EMPTY. It is no
+    # longer what gates — the release match below is — and empty here
+    # means "no additional constraint" rather than "verify nothing",
+    # because that match identifies the workload instead.
+    #
+    # Set it only to NARROW: a payer who lists hashes routes solely to
+    # those specific deployments, AND each must still be a published
+    # release. It cannot widen — pinning a hash never admits a node the
+    # release match refuses. Read a node's value with:
+    #
+    #   curl -s https://<host>/v1/zs/attestation | jq -r .event_log \
+    #     | jq -r '.[] | select(.event=="compose-hash") | .event_payload'
+    #
+    # The one exception is with the release match turned OFF (see below),
+    # where this becomes the only thing identifying a workload — and an
+    # empty list then refuses every node, which is the fail-closed
+    # direction and the setting with no visible symptom.
+    #
+    # trusted_compose_hashes:
+    #   - "<64-hex compose-hash from the command above>"
+    #
+    # trusted_os_images:
+    #   - "<64-hex os-image-hash — only to NARROW the preset>"
+    #
+    # This list can remove images but cannot add one. Each image also needs
+    # a measured boot chain (MRTD, RTMR0-2) compiled into the protocol
+    # module, and an image without one is refused whatever this list says.
+    #
+    # A BLESSED HASH IS NO LONGER THE WHOLE STORY. Since proto 9.6 a node
+    # also publishes the app-compose PREIMAGE, and the proxy checks its
+    # CONTENT against rules shared with the browser client: the env names
+    # it declares must be secrets only, its root boot hook must be one we
+    # recognize, and it must not install an operator-held SSH key. So a
+    # node whose hash you pasted above can still be refused — deliberately,
+    # since that is the case a hash allowlist cannot see. When it happens
+    # the proxy logs "the measured compose violates policy" with the
+    # specific rule; that WARN is the thing to read, not the
+    # measurement_mismatch that follows it.
+    #
+    # A node that publishes NO preimage is refused outright while the
+    # release match is on. It has to be: with the match as the gate there
+    # is nothing standing behind a skip, so "declines to publish" would
+    # otherwise skip every content rule — cheaper than substituting a
+    # document, which is the attack the hash gate exists to catch.
+    #
+    # trusted_pre_launch_digests is the escape hatch for the one rule whose
+    # reference is not ours to schedule. The ~17KB root boot script is
+    # injected by the Phala Cloud API at deploy time — it is not in the
+    # phala CLI — so its digest moves whenever Phala edits their template,
+    # with no version to track. If honest nodes start failing on
+    # pre_launch_script, read the script out of the published document,
+    # satisfy yourself about what it does, and list its digest here. Empty
+    # means "use the built-in list", not "accept anything"; setting it
+    # REPLACES the built-in one.
+    #
+    # trusted_pre_launch_digests:
+    #   - "<64-hex sha256 of a pre-launch script you have read>"
+    #
+    # THE RELEASE LISTS — the check that makes everything above mean
+    # "runs software we recognize" rather than "nothing structurally
+    # disqualifying". Without them, a compose pinning
+    # `image: ${SOME_VAR}` holds a perfectly stable compose_hash over
+    # arbitrary code and satisfies every other rule here.
+    #
+    # ALL THREE KEYS SHIP SEEDED AND ON — there is nothing to set for a
+    # payer routing to published zs-node releases. Leaving them unset is
+    # not the check being idle; it is the check running on the built-in
+    # lists.
+    #
+    # SETTING EITHER LIST REPLACES THE BUILT-IN ONE OUTRIGHT — it does not
+    # append. So adding your own node means listing the shipped values too,
+    # or every published release stops being routable. Start from the real
+    # current values rather than a copy from this file:
+    #
+    #   zs-proxy config print-effective
+    #
+    # which prints them as copy-pasteable YAML and needs no config file.
+    #
+    # trusted_compose_skeletons holds the sha256 of a published release
+    # compose with its two operator-varying spans blanked out: the
+    # `image:` reference and the `NODE_CONFIG_YAML:` block scalar. So two
+    # operators running the same release with different configs produce
+    # the SAME skeleton digest, while anything else they change — a bind
+    # mount, an added port, a second service, a moved comment — produces
+    # a different one and stops matching. Nothing enumerates what is
+    # forbidden; everything the published compose does not contain is.
+    #
+    # trusted_node_images holds the image references themselves, compared
+    # VERBATIM and case-sensitively. Separate from the skeleton because
+    # the two move on different cadences — the shape changes when the
+    # deployment changes, the image on every release — and verbatim
+    # rather than digest-only because the repository half is what says
+    # these bytes are the ones CI published.
+    #
+    # Get both values from a deployed node, or from the published compose
+    # before any node runs it:
+    #
+    #   zs-proxy tee inspect https://<host> --chain
+    #   zs-proxy tee inspect --file docker-compose.yaml
+    #
+    # PASS --chain WHEN READING FROM A NODE. Without it the quote's signature
+    # is never examined, and the event-log replay is then arithmetic over
+    # bytes the node supplied — a hostile node can name its own skeleton
+    # digest and have you paste it here, blessing its deployment shape for
+    # every node this proxy talks to. The report says `verified: false` and
+    # prints `quote chain: NOT CHECKED` whenever that step was skipped.
+    #
+    # In --file mode the bytes must be EXACTLY the ones that will be measured.
+    # A differing trailing newline is enough to move the skeleton digest, and
+    # a digest that is off by one byte refuses every node while looking like
+    # a correctly configured allowlist.
+    #
+    # POPULATING THE LISTS DOES NOT TURN THE CHECK ON — enforce_compose_
+    # skeleton does, and it is a separate key on purpose (proto/SPEC.md §3e).
+    # Deriving enforcement from "are the lists empty" reads as safer and is
+    # not: this file is parsed leniently, so a misspelled key is silently
+    # dropped, and a derived flag would turn that typo into a proxy that
+    # routes to anything while its config looks correct. With the switch
+    # written down, the same typo enforces over an empty list and refuses
+    # every node — which is loud, immediate, and obvious to diagnose.
+    #
+    # So set all three together. Two states are fail-closed and reported at
+    # startup: enforcement on with a list empty refuses every node, and
+    # enforcement on with only ONE list populated refuses every node on the
+    # other. The third — lists populated, enforcement off — is the one this
+    # design deliberately leaves reachable, and the proxy WARNs about it,
+    # because a verifier that carries reference data and consults none of it
+    # is a defect rather than a lenient policy.
+    #
+    # When you do write either list, write it in list-item form and never
+    # as a `key: []` stub you mean to fill in later: at that moment it is a
+    # populated-and-empty list, which refuses every node.
+    #
+    # THE SHIPPED VALUES ARE DELIBERATELY NOT RESTATED HERE. They live in
+    # attest.TrustedComposeSkeletons / attest.TrustedNodeImages in the
+    # zerosignal protocol module (go/attest/releases.go), where zs-node's
+    # release CI appends to them on every version tag. A commented copy in
+    # this file would be one more hand-maintained mirror, in another syntax,
+    # that nothing tests — so it would go stale first and be believed anyway.
+    #
+    # TO READ THEM, mind which question you are asking. The literals in
+    # go/attest/releases.go are what this build SHIPS. `zs-proxy config
+    # print-effective` shows what it is EFFECTIVELY using — defaults overlaid
+    # with this file, the environment and flags — and setting either list here
+    # REPLACES the built-in one rather than adding to it, so once you have
+    # narrowed them that command prints your narrowed list, not the shipped
+    # one.
+    #
+    # (`zs-proxy tee inspect --file <a release compose>` COMPUTES the two
+    # values from a compose you already hold. It does not check them against
+    # these lists — membership is annotated only when inspecting a live node
+    # or an app-compose.json, and only with enforcement on.)
+    #
+    # TO ROUTE TO AN UNPUBLISHED BUILD — a node you run yourself, or one
+    # built from a branch — keep the release match ON and add that build to
+    # both lists. Because setting a list replaces the shipped one, copy the
+    # shipped values first from `zs-proxy config print-effective --config ""`,
+    # which ignores this file, then add the node's two values from
+    # `zs-proxy tee inspect https://<host> --chain`:
+    #
+    #   trusted_compose_skeletons:
+    #     - "<each shipped digest>"
+    #     - "<that node's skeleton digest>"
+    #   trusted_node_images:
+    #     - "<each shipped image>"
+    #     - "<that node's image reference>"
+    #
+    # The two lists are checked separately and apply to every node: any node
+    # whose skeleton is on the first and image on the second is attested, so
+    # the entries widen trust beyond that one node. Replace the shipped values
+    # with a fresh copy after each upgrade, since your lists no longer follow
+    # what a release adds, or what it removes.
+    #
+    # Turning the match off instead (enforce_compose_skeleton: false, with
+    # trusted_compose_hashes pinning the node's compose-hash) still lets the
+    # evidence verify, but a node is TEE-attested only when its compose
+    # matched a release, so the proxy sends it no TEE-required traffic. It
+    # shows as verified, not attested. With the match off and no hash pinned,
+    # no dstack-tdx evidence verifies.
+    #
+    # `trusted_compose_hashes` is not itself a way around the match. With
+    # the match ON it NARROWS — applied in addition — so pinning a hash
+    # never admits a node the release match refuses.
+
+# Mnemonics for payment-txn signing are not configured here —
+# they come from env vars or cloud-secret URLs.
+# See https://github.com/TxnLab/zerosignal/blob/main/go/keystore/README.md
+# for the env-var (<NAME>_MNEMONIC) and
+# ZS_MNEMONIC_URLS options. With a single mnemonic loaded the proxy
+# auto-derives proxy_payer_addr from it; with multiple, set
+# proxy_payer_addr above to the address whose mnemonic should sign.
+# Either way the chosen address must be present in the keystore — the
+# wallet refuses to start otherwise.
