@@ -94,7 +94,7 @@ RELEASE_REPO  ?= txnlab/zs-proxy
 # drafting call is a real, billed chat completion against your own wallet, so it needs
 # a funded wallet and an operator serving the model. PRODUCT is derived from
 # RELEASE_REPO so the prompt names the right binary and audience.
-RELEASE_NOTES_MODEL ?= grok-4.6
+RELEASE_NOTES_MODEL ?= grok-4.7
 RELEASE_NOTES_URL   ?= http://127.0.0.1:9376/v1
 PRODUCT             ?= $(notdir $(RELEASE_REPO))
 
@@ -110,7 +110,7 @@ PRODUCT             ?= $(notdir $(RELEASE_REPO))
 # A failed call leaves an existing RELEASE_NOTES.md untouched; the result is leak-scanned.
 # NOTE: no $(GOBUILD_ENV) prefix — GOOS/GOARCH above are for the release build and
 # would cross-compile this host tool to linux/amd64.
-#   make release-notes                                     # grok-4.6, local proxy
+#   make release-notes                                     # grok-4.7, local proxy
 #   make release-notes RELEASE_NOTES_MODEL=claude-opus-5   # a different model
 #   make release-notes ARGS=-dry-run                       # print the prompt, no spend
 #   make release-notes ARGS=-offline                       # deterministic buckets, no model

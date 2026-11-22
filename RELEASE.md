@@ -425,7 +425,7 @@ The last line (`set-key-partition-list`) is the non-obvious bit that stops
 | `DISCORD_WEBHOOK_ID` / `DISCORD_WEBHOOK_TOKEN` | `make release` (goreleaser announce) | the two halves of the #releases webhook URL `.../webhooks/<ID>/<TOKEN>`. **Both** set → the release is announced to Discord; either unset → skipped. See [Discord release announcement](#discord-release-announcement). |
 | `NOTARY_PROFILE` | `make notary-setup`/`notarize` | notarytool keychain profile name (default `zerosignal-notary`). |
 | `ARTIFACT` | `make notarize` | artifact to notarize (default: the darwin universal archive in `dist/`). |
-| `RELEASE_NOTES_MODEL` | `make release-notes` | model to draft the notes with (default `grok-4.6`). Must be advertised by the proxy at `RELEASE_NOTES_URL` — the tool checks before spending. |
+| `RELEASE_NOTES_MODEL` | `make release-notes` | model to draft the notes with (default `grok-4.7`). Must be advertised by the proxy at `RELEASE_NOTES_URL` — the tool checks before spending. |
 | `RELEASE_NOTES_URL` | `make release-notes` | OpenAI-compatible base URL of the running proxy to draft against (default `http://127.0.0.1:9376/v1`). |
 | `ARGS` | `make release-notes` | passed through to the drafting tool: `-offline` (no model, plain commit subjects), `-dry-run` (print the prompt), `-keep-going`, `-from`/`-to`, `-debug-dir`. |
 | `ZS_RELEASE_NOTES_MODEL` / `ZS_RELEASE_NOTES_URL` / `ZS_RELEASE_NOTES_TIMEOUT` | drafting tool | env fallbacks for the same three settings, for use outside `make`. |
