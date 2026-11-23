@@ -3,7 +3,7 @@ module github.com/TxnLab/zs-proxy
 go 1.27.0
 
 require (
-	github.com/TxnLab/zerosignal/go v0.23.0
+	github.com/TxnLab/zerosignal/go v0.23.2
 	github.com/algorand/go-algorand-sdk/v2 v2.12.0
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/pelletier/go-toml/v2 v2.4.3
