@@ -42,8 +42,8 @@ github.com/AzureAD/microsoft-authentication-extensions-for-go/cache v0.1.1 h1:WJ
 github.com/AzureAD/microsoft-authentication-extensions-for-go/cache v0.1.1/go.mod h1:tCcJZ0uHAmvjsVYzEFivsRTN00oz5BEsRgQHu5JZ9WE=
 github.com/AzureAD/microsoft-authentication-library-for-go v1.7.2 h1:RHK7bS+HQMslb1sZpAokUt+zTVmue0hKSs2C791hhzU=
 github.com/AzureAD/microsoft-authentication-library-for-go v1.7.2/go.mod h1:HKpQxkWaGLJ+D/5H8QRpyQXA1eKjxkFlOMwck5+33Jk=
-github.com/TxnLab/zerosignal/go v0.23.0 h1:DjvKPk281HRcmBghGIovtsyz0tl4P27kN+beevhNhEU=
-github.com/TxnLab/zerosignal/go v0.23.0/go.mod h1:lmFT8AtGSmu2ORnx+50EOQVU8Sdtx8YlFwz3HqSBUBk=
+github.com/TxnLab/zerosignal/go v0.23.2 h1:olUy31zelQaATUTm9ryfbaO3qw0I/8QAJ/AO60/VyGI=
+github.com/TxnLab/zerosignal/go v0.23.2/go.mod h1:lmFT8AtGSmu2ORnx+50EOQVU8Sdtx8YlFwz3HqSBUBk=
 github.com/algonode/go-algorand-hd-wallet v0.1.2 h1:KRJEOQMcOEgSTUDsA1o4JIIxpqzl49Zb4akZYwBWhQE=
 github.com/algonode/go-algorand-hd-wallet v0.1.2/go.mod h1:qzY39UESh0fXsWVf4QMEmo57EuzXMdL0bS8AWypiDhc=
 github.com/algorand/avm-abi v0.2.0 h1:bkjsG+BOEcxUcnGSALLosmltE0JZdg+ZisXKx0UDX2k=
